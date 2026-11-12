@@ -65,7 +65,7 @@ jobs:
                                            -e 's/\([0-9]\)-alpha\.\([0-9]\)/\1_alpha\2/' \
                                            -e 's/-/_/g')"
           ID="$V${VAR:+-$VAR}"
-          [ "$R" != "0" ] && ID="$ID-r$R"
+          if [ "$R" != "0" ]; then ID="$ID-r$R"; fi
           ls -l dist
           test -f "dist/dsh-$V.squashfs" || { echo "::error::missing dist/dsh-$V.squashfs"; exit 1; }
           cp "dist/dsh-$V.squashfs" "dist/dsh-$ID.squashfs"

@@ -67,7 +67,7 @@ recipe() {   # 在目标环境里执行：$1=dsh version, $2=工作目录
 	DSHV="$(node -p "require('./node_modules/@deepseek-ai/dsh/package.json').version")"
 	PTYV="$(node -p "require('./node_modules/node-pty/package.json').version")"
 	ID="$VER${VARIANT:+-$VARIANT}"
-	[ "${REV:-0}" != "0" ] && ID="$ID-r$REV"
+	if [ "${REV:-0}" != "0" ]; then ID="$ID-r$REV"; fi
 	cat > MANIFEST.json <<EOF
 {
   "schema": 1,
@@ -89,24 +89,19 @@ EOF
 }
 
 if [ "$MODE" = container ]; then
-	# 仓库目录挂成 /src（vendor/pty.node、build.sh 都在里面）✓
-	docker run --rm -v "$HERE:/src" "$NODE_IMAGE" sh -eu -c "
-		apk add --no-cache python3 squashfs-tools >/dev/null
-		cd /build && mkdir -p work && cd work
-		sh /src/build.sh --here '$VER'
-		mkdir -p /out/root/usr/local/lib/dsh-mu-runtime /out/root/etc/dsh-mu-runtime
-		cp -a node_modules package.json MANIFEST.json /out/root/usr/local/lib/dsh-mu-runtime/
-		cp /out/root/usr/local/lib/dsh-mu-runtime/node_modules/@deepseek-ai/dsh/LICENSE* \
-			/out/root/usr/local/lib/dsh-mu-runtime/ 2>/dev/null || true
-		printf '%s\n' '$VER' > /out/root/etc/dsh-mu-runtime/version
-		mkdir -p /out/dist
-		# 镜像根必须就是"含 node_modules 的那层" ✓ 挂载后 /node_modules/@deepseek-ai/dsh
-		mksquashfs /out/root/usr/local/lib/dsh-mu-runtime "dsh-$VER.squashfs" \
-			-comp zstd -noappend -quiet >/dev/null
-		cp "dsh-$VER.squashfs" /out/dist/
-		cp MANIFEST.json /out/dist/dsh-$VER.manifest.json
-	"
+	# 容器里只做一件事：调用本脚本的 --here 分支（它自己会产出 squashfs + manifest）
+	# 早先这里多写了一段 cp（以为工作目录里还有 node_modules ✗）→ CI 上必然失败 ✓
+	mkdir -p "$HERE/dist"
+	docker run --rm \
+		-v "$HERE:/src" -v "$HERE/dist:/out" \
+		-e VER="$VER" -e REV="$REV" -e VARIANT="${VARIANT:-}" -e ARCH="$ARCH" \
+		"$NODE_IMAGE" sh -eu -c '
+			apk add --no-cache python3 squashfs-tools bash >/dev/null
+			mkdir -p /out
+			WORK=/tmp/build-work OUT=/out sh /src/build.sh --here "$VER" "$REV"
+		'
 	( cd "$HERE/dist" && ls -l && sha256sum dsh-*.squashfs > SHA256SUMS && cat SHA256SUMS )
+	echo "== done: $HERE/dist =="
 else
 	echo "--here: building in the current environment"
 	R="${R:-/var/lib/dsh-mu/gateway/rootfs}"
