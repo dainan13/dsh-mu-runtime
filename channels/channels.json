@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "note": "由 runtime-release workflow 维护；dsh-muctl runtime install（不带版本）读这里的 default",
+  "default": {
+    "dsh": "0.2.2-rc.1",
+    "pkgver": "0.2.2_rc1",
+    "rev": 0,
+    "sha256": "",
+    "url": ""
+  },
+  "alpha": []
+}
