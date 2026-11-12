@@ -92,15 +92,29 @@ if [ "$MODE" = container ]; then
 	# 容器里只做一件事：调用本脚本的 --here 分支（它自己会产出 squashfs + manifest）
 	# 早先这里多写了一段 cp（以为工作目录里还有 node_modules ✗）→ CI 上必然失败 ✓
 	mkdir -p "$HERE/dist"
+	# /out/dist ←→ 宿主 dist/：脚本内部会写 $OUT/dist 与 $OUT/root
+	# 早先挂成 /out 少了一层 → 宿主变成 dist/dist/…（CI 上踩过 ✓）
 	docker run --rm \
-		-v "$HERE:/src" -v "$HERE/dist:/out" \
+		-v "$HERE:/src" -v "$HERE/dist:/out/dist" \
 		-e VER="$VER" -e REV="$REV" -e VARIANT="${VARIANT:-}" -e ARCH="$ARCH" \
 		"$NODE_IMAGE" sh -eu -c '
 			apk add --no-cache python3 squashfs-tools bash >/dev/null
 			mkdir -p /out
 			WORK=/tmp/build-work OUT=/out sh /src/build.sh --here "$VER" "$REV"
 		'
-	( cd "$HERE/dist" && ls -l && sha256sum dsh-*.squashfs > SHA256SUMS && cat SHA256SUMS )
+	# 兜底：如果产物落在了 dist/dist/（挂载层级不同），先搬上来 ✓
+	if ! ls "$HERE/dist"/dsh-*.squashfs >/dev/null 2>&1; then
+		for f in "$HERE"/dist/dist/dsh-*.squashfs "$HERE"/dist/dist/dsh-*.manifest.json; do
+			[ -f "$f" ] && mv -f "$f" "$HERE/dist/" || true
+		done
+	fi
+	if ls "$HERE/dist"/dsh-*.squashfs >/dev/null 2>&1; then
+		( cd "$HERE/dist" && ls -l && sha256sum dsh-*.squashfs > SHA256SUMS && cat SHA256SUMS )
+	else
+		echo "!! no squashfs produced; contents of $HERE/dist:" >&2
+		find "$HERE/dist" -maxdepth 3 | head -40 >&2
+		exit 1
+	fi
 	echo "== done: $HERE/dist =="
 else
 	echo "--here: building in the current environment"
