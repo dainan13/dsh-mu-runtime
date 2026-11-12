@@ -109,7 +109,11 @@ if [ "$MODE" = container ]; then
 		done
 	fi
 	if ls "$HERE/dist"/dsh-*.squashfs >/dev/null 2>&1; then
-		( cd "$HERE/dist" && ls -l && sha256sum dsh-*.squashfs > SHA256SUMS && cat SHA256SUMS )
+		# 容器里由 root 生成的 SHA256SUMS 可能属于 root ✗ 宿主 runner 无权覆盖 ✗
+		# 已经存在就只打印 ✓ 不存在再补（失败也不致命 ✓）
+		( cd "$HERE/dist" && ls -l \
+			&& { [ -f SHA256SUMS ] || sha256sum dsh-*.squashfs > SHA256SUMS 2>/dev/null || true; } \
+			&& cat SHA256SUMS 2>/dev/null || true )
 	else
 		echo "!! no squashfs produced; contents of $HERE/dist:" >&2
 		find "$HERE/dist" -maxdepth 3 | head -40 >&2
