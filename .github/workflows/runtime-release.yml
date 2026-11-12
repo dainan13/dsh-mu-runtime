@@ -1,19 +1,24 @@
 name: runtime-release
 
-# 手工触发（Actions → runtime-release → Run workflow）。
-# 表单字段见下；打 tag **不**触发（避免"打了个 tag 就意外发版"）。
+# 手工触发：Actions → runtime-release → Run workflow（打 tag 不会触发）
+# 产物：dsh-<id>.squashfs + dsh-<id>.manifest.json + SHA256SUMS
+# 若 channel != none，会把这一条写进 channels/channels.json 并提交（默认 / alpha 两个指针）
 on:
   workflow_dispatch:
     inputs:
       dsh_version:
-        description: "DSH 版本，含预发布：0.2.2-rc.1 / 0.2.3-alpha.1 / 0.2.3"
+        description: "DSH 版本（含预发布）：0.2.1-rc.5 / 0.2.2-rc.1 / 0.2.3-alpha.1"
         required: true
       rev:
-        description: "构建修订号（我们自己重打包时 +1；DSH 版本不变则 rev 必须不同）"
+        description: "构建修订号（同一 DSH 版本重打包就 +1）"
         required: true
         default: "0"
+      variant:
+        description: "变体（留空 = plain；例如 vscode）"
+        required: false
+        default: ""
       channel:
-        description: "把结果登记到哪个通道（none = 只发 release，不改默认）"
+        description: "登记到哪个通道（none = 只发 release）"
         type: choice
         options: [none, default, alpha]
         default: none
@@ -22,10 +27,6 @@ on:
         type: choice
         options: [x86_64]
         default: x86_64
-      repo_base:
-        description: "本仓库 raw 根（用于更新 channels.json），一般不用改"
-        required: false
-        default: "https://raw.githubusercontent.com/dainan13/dsh-mu-runtime/main"
 
 permissions:
   contents: write
@@ -34,7 +35,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Validate inputs
         run: |
@@ -42,31 +43,36 @@ jobs:
           V="${{ inputs.dsh_version }}"
           case "$V" in
             [0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::dsh_version must look like 0.2.2 / 0.2.2-rc.1 / 0.2.3-alpha.1"; exit 1 ;;
+            *) echo "::error::dsh_version 应形如 0.2.1-rc.5 / 0.2.2"; exit 1 ;;
           esac
-          case "${{ inputs.rev }}" in ''|*[!0-9]*) echo "::error::rev must be an integer"; exit 1 ;; esac
+          case "${{ inputs.rev }}" in ''|*[!0-9]*) echo "::error::rev 必须是整数"; exit 1 ;; esac
 
-      - name: Build (node:24-alpine, prune, prebuilt pty.node)
+      - name: Build (node:24-alpine, prune, prebuilt pty.node, mksquashfs)
         env:
           ARCH: ${{ inputs.arch }}
-        run: ./build.sh "${{ inputs.dsh_version }}" "${{ inputs.rev }}"
+          VARIANT: ${{ inputs.variant }}
+        # 注意：用 `sh ./build.sh` 而不是 `./build.sh`
+        # —— 仓库里的可执行位可能丢失，直接执行会 exit 126（踩过）
+        run: sh ./build.sh "${{ inputs.dsh_version }}" "${{ inputs.rev }}"
 
       - name: Collect assets
         id: a
         run: |
           set -eu
-          V="${{ inputs.dsh_version }}"; R="${{ inputs.rev }}"
+          V="${{ inputs.dsh_version }}"; R="${{ inputs.rev }}"; VAR="${{ inputs.variant }}"
           PKGVER="$(printf '%s' "$V" | sed -e 's/\([0-9]\)-rc\.\([0-9]\)/\1_rc\2/' \
                                            -e 's/\([0-9]\)-beta\.\([0-9]\)/\1_beta\2/' \
                                            -e 's/\([0-9]\)-alpha\.\([0-9]\)/\1_alpha\2/' \
                                            -e 's/-/_/g')"
-          APK="dsh-mu-runtime-$PKGVER-r$R.apk"
-          cp "dist/dsh-mu-runtime-$PKGVER-r0.apk" "dist/$APK"
-          cp "dist/dsh-mu-runtime-$PKGVER-r0.apk" dist/dsh-mu-runtime.apk
-          ( cd dist && sha256sum "$APK" dsh-mu-runtime.apk > SHA256SUMS )
-          echo "pkgver=$PKGVER" >> "$GITHUB_OUTPUT"
-          echo "apk=$APK" >> "$GITHUB_OUTPUT"
-          echo "sha=$(sha256sum "dist/$APK" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          ID="$V${VAR:+-$VAR}"
+          [ "$R" != "0" ] && ID="$ID-r$R"
+          ls -l dist
+          test -f "dist/dsh-$V.squashfs" || { echo "::error::missing dist/dsh-$V.squashfs"; exit 1; }
+          cp "dist/dsh-$V.squashfs" "dist/dsh-$ID.squashfs"
+          cp "dist/dsh-$V.manifest.json" "dist/dsh-$ID.manifest.json"
+          ( cd dist && sha256sum "dsh-$ID.squashfs" > SHA256SUMS && cat SHA256SUMS )
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "sha=$(sha256sum "dist/dsh-$ID.squashfs" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           is_pre=false
           case "$V" in *-alpha.*|*-beta.*|*-rc.*) is_pre=true ;; esac
           echo "prerelease=$is_pre" >> "$GITHUB_OUTPUT"
@@ -74,11 +80,11 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: runtime-v${{ steps.a.outputs.pkgver }}-r${{ inputs.rev }}
-          name: dsh-mu-runtime ${{ inputs.dsh_version }} (r${{ inputs.rev }})
+          tag_name: runtime-${{ steps.a.outputs.id }}
+          name: dsh-mu-runtime ${{ steps.a.outputs.id }}
           files: |
-            dist/${{ steps.a.outputs.apk }}
-            dist/dsh-mu-runtime.apk
+            dist/dsh-${{ steps.a.outputs.id }}.squashfs
+            dist/dsh-${{ steps.a.outputs.id }}.manifest.json
             dist/SHA256SUMS
           fail_on_unmatched_files: true
           prerelease: ${{ steps.a.outputs.prerelease }}
@@ -89,29 +95,30 @@ jobs:
           CH: ${{ inputs.channel }}
           V: ${{ inputs.dsh_version }}
           R: ${{ inputs.rev }}
-          PKGVER: ${{ steps.a.outputs.pkgver }}
+          VAR: ${{ inputs.variant }}
+          ID: ${{ steps.a.outputs.id }}
           SHA: ${{ steps.a.outputs.sha }}
           REPO: ${{ github.repository }}
         run: |
           set -eu
-          TAG="runtime-v$PKGVER-r$R"
-          URL="https://github.com/$REPO/releases/download/$TAG/dsh-mu-runtime-$PKGVER-r$R.apk"
-          python3 - "$CH" "$V" "$PKGVER" "$R" "$SHA" "$URL" <<'PY'
+          URL="https://github.com/$REPO/releases/download/runtime-$ID/dsh-$ID.squashfs"
+          python3 - "$CH" "$V" "$ID" "$R" "$SHA" "$URL" "$VAR" <<'PY'
           import json, sys
-          ch, dsh, pkgver, rev, sha, url = sys.argv[1:7]
+          ch, dsh, rid, rev, sha, url, var = sys.argv[1:8]
           p = "channels/channels.json"
           doc = json.load(open(p))
-          row = {"dsh": dsh, "pkgver": pkgver, "rev": int(rev), "sha256": sha, "url": url}
+          row = {"id": rid, "dsh": dsh, "rev": int(rev), "variant": var or "plain",
+                 "sha256": sha, "url": url}
           if ch == "default":
               doc["default"] = row
-              doc["alpha"] = [a for a in doc.get("alpha", []) if a.get("dsh") != dsh]
-          else:  # alpha 通道：追加/替换同版本条目，绝不动 default
-              doc["alpha"] = [a for a in doc.get("alpha", []) if a.get("dsh") != dsh] + [row]
+              doc["alpha"] = [a for a in doc.get("alpha", []) if a.get("id") != rid]
+          else:
+              doc["alpha"] = [a for a in doc.get("alpha", []) if a.get("id") != rid] + [row]
           open(p, "w").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
-          print("channels.json ->", json.dumps(doc, ensure_ascii=False)[:200])
+          print(json.dumps(doc, ensure_ascii=False)[:300])
           PY
           git config user.name "runtime-release"
           git config user.email "runtime-release@users.noreply.github.com"
           git add channels/channels.json
-          git commit -m "channels: $CH -> $V (r$R)" || true
+          git commit -m "channels: $CH -> $ID" || true
           git push

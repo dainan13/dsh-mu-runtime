@@ -50,6 +50,10 @@ recipe() {   # 在目标环境里执行：$1=dsh version, $2=工作目录
 
 	echo "== node-pty: reuse a prebuilt musl binary (no compile) =="
 	PTY_SRC="${PTY_SRC:-/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/node-pty/build/Release/pty.node}"
+	# CI 里没有现成运行时 ⇒ 用仓库里 vendor/node-pty/pty.node（同版本 ✓ 已校验）
+	if [ ! -f "$PTY_SRC" ] && [ -f /src/vendor/node-pty/pty.node ]; then
+		PTY_SRC=/src/vendor/node-pty/pty.node
+	fi
 	[ -f "$PTY_SRC" ] || { echo "   !! no prebuilt pty.node at $PTY_SRC"; exit 1; }
 	mkdir -p node_modules/node-pty/build/Release
 	cp "$PTY_SRC" node_modules/node-pty/build/Release/pty.node
@@ -62,7 +66,8 @@ recipe() {   # 在目标环境里执行：$1=dsh version, $2=工作目录
 	echo "== manifest =="
 	DSHV="$(node -p "require('./node_modules/@deepseek-ai/dsh/package.json').version")"
 	PTYV="$(node -p "require('./node_modules/node-pty/package.json').version")"
-	ID="$VER${VARIANT:+-$VARIANT}${REV:+-r$REV}"
+	ID="$VER${VARIANT:+-$VARIANT}"
+	[ "${REV:-0}" != "0" ] && ID="$ID-r$REV"
 	cat > MANIFEST.json <<EOF
 {
   "schema": 1,
@@ -84,6 +89,7 @@ EOF
 }
 
 if [ "$MODE" = container ]; then
+	# 仓库目录挂成 /src（vendor/pty.node、build.sh 都在里面）✓
 	docker run --rm -v "$HERE:/src" "$NODE_IMAGE" sh -eu -c "
 		apk add --no-cache python3 squashfs-tools >/dev/null
 		cd /build && mkdir -p work && cd work
