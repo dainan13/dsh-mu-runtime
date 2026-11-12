@@ -68,8 +68,13 @@ jobs:
           if [ "$R" != "0" ]; then ID="$ID-r$R"; fi
           ls -l dist
           test -f "dist/dsh-$V.squashfs" || { echo "::error::missing dist/dsh-$V.squashfs"; exit 1; }
-          cp "dist/dsh-$V.squashfs" "dist/dsh-$ID.squashfs"
-          cp "dist/dsh-$V.manifest.json" "dist/dsh-$ID.manifest.json"
+          # rev=0 时 ID == V（都叫 0.2.1-rc.5）→ 不能 cp 到同一个名字 ✗（踩过）
+          if [ "$ID" != "$V" ]; then
+            cp "dist/dsh-$V.squashfs" "dist/dsh-$ID.squashfs"
+            cp "dist/dsh-$V.manifest.json" "dist/dsh-$ID.manifest.json"
+          fi
+          # 容器里生成的 SHA256SUMS 属于 root ✗ runner 覆盖会 EACCES → 先 sudo 删掉再生成
+          sudo rm -f dist/SHA256SUMS
           ( cd dist && sha256sum "dsh-$ID.squashfs" > SHA256SUMS && cat SHA256SUMS )
           echo "id=$ID" >> "$GITHUB_OUTPUT"
           echo "sha=$(sha256sum "dist/dsh-$ID.squashfs" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
