@@ -2,7 +2,7 @@
   "schema": 2,
   "note": "由 runtime-release workflow 维护；dsh-muctl runtime install（不带版本）读这里的 default",
   "default": {
-    "id": "0.2.2-rc.2-523bba",
+    "id": "0.2.2-rc.2-plain-523bba",
     "dsh": "0.2.2-rc.2",
     "rev": 0,
     "variant": "plain",

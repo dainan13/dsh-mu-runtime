@@ -2,7 +2,7 @@
   "schema": 1,
   "runtimes": [
     {
-      "id": "0.2.2-rc.2-523bba",
+      "id": "0.2.2-rc.2-plain-523bba",
       "dsh": "0.2.2-rc.2",
       "variant": "plain",
       "rev": 0,

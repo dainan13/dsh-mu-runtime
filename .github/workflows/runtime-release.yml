@@ -59,12 +59,12 @@ jobs:
         id: a
         run: |
           set -eu
-          V="${{ inputs.dsh_version }}"; R="${{ inputs.rev }}"; VAR="${{ inputs.variant }}"
+          V="${{ inputs.dsh_version }}"; R="${{ inputs.rev }}"; VAR="${{ inputs.variant || 'plain' }}"
           PKGVER="$(printf '%s' "$V" | sed -e 's/\([0-9]\)-rc\.\([0-9]\)/\1_rc\2/' \
                                            -e 's/\([0-9]\)-beta\.\([0-9]\)/\1_beta\2/' \
                                            -e 's/\([0-9]\)-alpha\.\([0-9]\)/\1_alpha\2/' \
                                            -e 's/-/_/g')"
-          ID="$V${VAR:+-$VAR}"
+          ID="$V-$VAR"        # variant 段永远写出来（plain 也写）✓ 与平台命名一致
           if [ "$R" != "0" ]; then ID="$ID-r$R"; fi
           ls -l dist
           test -f "dist/dsh-$V.squashfs" || { echo "::error::missing dist/dsh-$V.squashfs"; exit 1; }
@@ -99,7 +99,7 @@ jobs:
         env:
           V: ${{ inputs.dsh_version }}
           R: ${{ inputs.rev }}
-          VAR: ${{ inputs.variant }}
+          VAR: ${{ inputs.variant || 'plain' }}
           ID: ${{ steps.a.outputs.id }}
           SHA: ${{ steps.a.outputs.sha }}
           REPO: ${{ github.repository }}
@@ -141,7 +141,7 @@ jobs:
           CH: ${{ inputs.channel }}
           V: ${{ inputs.dsh_version }}
           R: ${{ inputs.rev }}
-          VAR: ${{ inputs.variant }}
+          VAR: ${{ inputs.variant || 'plain' }}
           ID: ${{ steps.a.outputs.id }}
           SHA: ${{ steps.a.outputs.sha }}
           REPO: ${{ github.repository }}
