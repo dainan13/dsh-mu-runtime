@@ -50,7 +50,7 @@ jobs:
       - name: Build (node:24-alpine, prune, prebuilt pty.node, mksquashfs)
         env:
           ARCH: ${{ inputs.arch }}
-          VARIANT: ${{ inputs.variant }}
+          VARIANT: ${{ inputs.variant || 'plain' }}
         # 注意：用 `sh ./build.sh` 而不是 `./build.sh`
         # —— 仓库里的可执行位可能丢失，直接执行会 exit 126（踩过）
         run: sh ./build.sh "${{ inputs.dsh_version }}" "${{ inputs.rev }}"
@@ -68,16 +68,17 @@ jobs:
           if [ "$R" != "0" ]; then ID="$ID-r$R"; fi
           ls -l dist
           test -f "dist/dsh-$V.squashfs" || { echo "::error::missing dist/dsh-$V.squashfs"; exit 1; }
-          # rev=0 时 ID == V（都叫 0.2.1-rc.5）→ 不能 cp 到同一个名字 ✗（踩过）
-          if [ "$ID" != "$V" ]; then
-            cp "dist/dsh-$V.squashfs" "dist/dsh-$ID.squashfs"
-            cp "dist/dsh-$V.manifest.json" "dist/dsh-$ID.manifest.json"
-          fi
+          # id 里必须带**内容指纹** ✓ 要和平台安装时的命名一致
+          # （否则"清单里的 id"和"装完的 id"不同 ✗ 用户会以为装错了）
+          SHA="$(sha256sum "dist/dsh-$V.squashfs" | cut -d' ' -f1)"
+          ID="$ID-$(printf '%s' "$SHA" | cut -c1-6)"
+          cp "dist/dsh-$V.squashfs" "dist/dsh-$ID.squashfs"
+          cp "dist/dsh-$V.manifest.json" "dist/dsh-$ID.manifest.json"
           # 容器里生成的 SHA256SUMS 属于 root ✗ runner 覆盖会 EACCES → 先 sudo 删掉再生成
           sudo rm -f dist/SHA256SUMS
           ( cd dist && sha256sum "dsh-$ID.squashfs" > SHA256SUMS && cat SHA256SUMS )
           echo "id=$ID" >> "$GITHUB_OUTPUT"
-          echo "sha=$(sha256sum "dist/dsh-$ID.squashfs" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           is_pre=false
           case "$V" in *-alpha.*|*-beta.*|*-rc.*) is_pre=true ;; esac
           echo "prerelease=$is_pre" >> "$GITHUB_OUTPUT"
@@ -93,6 +94,46 @@ jobs:
             dist/SHA256SUMS
           fail_on_unmatched_files: true
           prerelease: ${{ steps.a.outputs.prerelease }}
+
+      - name: Update the runtime index (runtimes.json — full history)
+        env:
+          V: ${{ inputs.dsh_version }}
+          R: ${{ inputs.rev }}
+          VAR: ${{ inputs.variant }}
+          ID: ${{ steps.a.outputs.id }}
+          SHA: ${{ steps.a.outputs.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          URL="https://github.com/$REPO/releases/download/runtime-$ID/dsh-$ID.squashfs"
+          mkdir -p channels
+          python3 - "$V" "$ID" "$R" "$SHA" "$URL" "$VAR" <<'PY'
+          import json, os, sys, time
+          dsh, rid, rev, sha, url, var = sys.argv[1:7]
+          p = "channels/runtimes.json"
+          try:
+              doc = json.load(open(p))
+          except Exception:
+              doc = {"schema": 1, "runtimes": []}
+          rows = [r for r in doc.get("runtimes", []) if r.get("id") != rid]
+          rows.insert(0, {
+              "id": rid, "dsh": dsh, "variant": var or "plain", "rev": int(rev),
+              "sha256": sha, "url": url, "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+          })
+          doc["runtimes"] = rows[:100]        # 只保留最近 100 条 ✓
+          doc["schema"] = 1
+          open(p, "w").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+          print("indexed", rid, "total", len(doc["runtimes"]))
+          PY
+          git config user.name "runtime-release"
+          git config user.email "runtime-release@users.noreply.github.com"
+          if ! git diff --quiet -- channels/runtimes.json; then
+            git add channels/runtimes.json
+            git commit -m "index: add $ID"
+            git push
+          else
+            echo "index unchanged"
+          fi
 
       - name: Update the channel pointer (channels.json)
         if: inputs.channel != 'none'
@@ -114,11 +155,16 @@ jobs:
           doc = json.load(open(p))
           row = {"id": rid, "dsh": dsh, "rev": int(rev), "variant": var or "plain",
                  "sha256": sha, "url": url}
+          # 通道就是**指针**（一个通道对应一个构建 ✓）
+          # 历史版本由 runtimes.json 负责 ✓ 不要在这里堆数组 ✗（会重复 ✗）
           if ch == "default":
               doc["default"] = row
-              doc["alpha"] = [a for a in doc.get("alpha", []) if a.get("id") != rid]
           else:
-              doc["alpha"] = [a for a in doc.get("alpha", []) if a.get("id") != rid] + [row]
+              doc[ch] = row
+          # 兼容旧文件：把历史的 alpha 数组收敛成最新一条 ✓
+          if isinstance(doc.get("alpha"), list):
+              arr = [a for a in doc["alpha"] if a.get("id") != rid]
+              doc["alpha"] = arr[0] if arr else doc.get("alpha") or row
           open(p, "w").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
           print(json.dumps(doc, ensure_ascii=False)[:300])
           PY

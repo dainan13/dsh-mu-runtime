@@ -16,7 +16,9 @@ MODE=container
 if [ "${1:-}" = "--here" ]; then MODE=here; shift; fi
 VER="${1:?usage: ./build.sh [--here] <dsh-version> [rev]}"
 REV="${2:-0}"
-VARIANT="${VARIANT:-}"          # 可选：vscode 之类；空 = plain
+# variant：本地构建默认 local ✓（CI 会显式传 plain 或用户指定的变体）
+# 这样"这台机器自己 build 的"和"CI 发的"在 id 上一眼可分 ✓
+VARIANT="${VARIANT:-local}"
 # apk 的版本语法只接受 `_rc<数字>` 这类后缀（`_rc.1` 里有小数点会报 invalid ✗）
 #   0.2.2-rc.1 → 0.2.2_rc1 ; 0.2.2-beta.3 → 0.2.2_beta3 ; 0.2.1 → 0.2.1
 PKGVER="$(printf '%s' "$VER" | sed -e 's/\([0-9]\)-rc\.\([0-9]\)/\1_rc\2/' -e 's/\([0-9]\)-beta\.\([0-9]\)/\1_beta\2/' -e 's/-/_/g')"
