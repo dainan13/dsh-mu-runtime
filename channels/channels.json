@@ -9,5 +9,14 @@
     "sha256": "570ca181c8251e92eae9480077bf8add1a8b4a8247c8538bbfeb78073799e287",
     "url": "https://github.com/dainan13/dsh-mu-runtime/releases/download/runtime-0.2.1-rc.5/dsh-0.2.1-rc.5.squashfs"
   },
-  "alpha": []
+  "alpha": [
+    {
+      "id": "0.2.2-alpha.3",
+      "dsh": "0.2.2-alpha.3",
+      "rev": 0,
+      "variant": "plain",
+      "sha256": "979c89163872b5645b2bf237b9f9ffe6953e9d70b8ba35787b9ae80563a2c5d9",
+      "url": "https://github.com/dainan13/dsh-mu-runtime/releases/download/runtime-0.2.2-alpha.3/dsh-0.2.2-alpha.3.squashfs"
+    }
+  ]
 }
