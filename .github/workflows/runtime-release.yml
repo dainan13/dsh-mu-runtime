@@ -79,6 +79,7 @@ jobs:
           ( cd dist && sha256sum "dsh-$ID.squashfs" > SHA256SUMS && cat SHA256SUMS )
           echo "id=$ID" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -c%s "dist/dsh-$ID.squashfs")" >> "$GITHUB_OUTPUT"
           is_pre=false
           case "$V" in *-alpha.*|*-beta.*|*-rc.*) is_pre=true ;; esac
           echo "prerelease=$is_pre" >> "$GITHUB_OUTPUT"
@@ -102,14 +103,15 @@ jobs:
           VAR: ${{ inputs.variant || 'plain' }}
           ID: ${{ steps.a.outputs.id }}
           SHA: ${{ steps.a.outputs.sha }}
+          SIZE: ${{ steps.a.outputs.size }}
           REPO: ${{ github.repository }}
         run: |
           set -eu
           URL="https://github.com/$REPO/releases/download/runtime-$ID/dsh-$ID.squashfs"
           mkdir -p channels
-          python3 - "$V" "$ID" "$R" "$SHA" "$URL" "$VAR" <<'PY'
+          python3 - "$V" "$ID" "$R" "$SHA" "$URL" "$VAR" "$SIZE" <<'PY'
           import json, os, sys, time
-          dsh, rid, rev, sha, url, var = sys.argv[1:7]
+          dsh, rid, rev, sha, url, var, size = sys.argv[1:8]
           p = "channels/runtimes.json"
           try:
               doc = json.load(open(p))
@@ -118,7 +120,8 @@ jobs:
           rows = [r for r in doc.get("runtimes", []) if r.get("id") != rid]
           rows.insert(0, {
               "id": rid, "dsh": dsh, "variant": var or "plain", "rev": int(rev),
-              "sha256": sha, "url": url, "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "sha256": sha, "size": int(size or 0), "url": url,
+              "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
           })
           doc["runtimes"] = rows[:100]        # 只保留最近 100 条 ✓
           doc["schema"] = 1
