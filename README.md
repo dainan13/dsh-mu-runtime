@@ -1,87 +1,78 @@
 # dsh-mu-runtime
 
-DSH 运行时的**纯净预装包**。一个 apk = node + npm + `@deepseek-ai/dsh@X` + 依赖 + 已编译的
-`node-pty`。**不含任何 dsh-mu 代码**，可以 hash 校验。
+DSH 运行时的**纯净预装包**：一个 squashfs 镜像，里面是 node + npm + `@deepseek-ai/dsh@X`
++ 依赖 + 已编译好的 musl `node-pty`。**不含任何 dsh-mu 代码**，可 sha256 校验。
 
-## 为什么要它
+## 为什么需要它
 
-现状是平台在客户机上"现场 npm install + node-gyp 编 node-pty"：
+平台最初的做法是在客户机上"现场 `npm install` + `node-gyp` 编 node-pty"：
 
-- 30–50 分钟，内存峰值很高（node-gyp 编译），实测把一台机器压到 load 45；
-- 中途 npm 会先删掉旧包，**运行时装到一半的窗口里，任何实例重启都起不来**；
+- 30–50 分钟，内存峰值很高（实测把一台机器压到 load 45）；
+- 中途 npm 会先删旧包，**运行时装到一半的窗口里，任何实例重启都起不来**；
 - musl 没有 node-pty 预编译包，编译失败就静默缺 `pty.node`，用户点「终端」才发现。
 
-打包成 apk 之后：安装 = 解包（秒级）、不需要网络、字节级确定、回滚 = 装旧 apk。
+打包成镜像后：安装 = 挂载（秒级）、不需要网络、字节级确定、回滚 = 换一个 id。
 
-## 分层与边界
+## 产物与命名
+
+每次发布产出三个资产（release 名 `runtime-<id>`）：
 
 ```
-L0  dsh-mu-runtime-<dshver>-r0.apk     ← 本仓库。纯净运行时，零我方代码。
-L1  dsh-mu-<ver>-r0.apk                ← 平台（admin / 网关 / jail / CLI / 注入）
+dsh-<id>.squashfs        运行时镜像（zstd squashfs，~95–100 MB）
+dsh-<id>.manifest.json   构建元数据（dsh 版本、node-pty 版本、arch/libc、pty sha256）
+SHA256SUMS               校验和（平台下载后用它对镜像校验）
 ```
 
-我们对 DSH 的"侵入"全部发生在 **L1**，且都不碰 DSH 的文件：
+`<id>` = `<dsh>-<variant>[-r<rev>]-<sha6>`
 
-| 侵入点 | 落点 | 是否改 DSH 包 |
+* `variant`：CI 默认 `plain`；本地 `build.sh` 默认 `local`；也可以是 `vscode` 之类的变体
+* `sha6`：镜像 sha256 的前 6 位（内容指纹）
+* ⇒ 同一个 DSH 版本可以有任意多个构建，互不覆盖；**清单里的 id 就是装完的 id**
+
+## 两个清单（`channels/`）
+
+| 文件 | 作用 | 维护者 |
 | --- | --- | --- |
-| `mu-shell.js`（侧栏卡 / F2） | 网关 `sub_filter` 注入 | 否 |
-| `dsh-client-models` 插件 | 实例 profile（官方插件机制） | 否 |
-| `cordis.patch.yml` | 实例 profile（官方 overlay） | 否 |
-| `pty.node` | 运行时依赖的二进制 | 本包负责 |
+| `channels.json` | **指针**：`default` / `alpha` 各一条 | CI（`channel` 参数）|
+| `runtimes.json` | **历史**：每次发布追加一条（id/dsh/variant/rev/sha256/size/url/built_at），最多 100 条 | CI |
 
-真正耦合的是**接口契约**（DOM 结构、插件 slot API、patch schema），由平台侧的
-`compat.json`（支持的 DSH 版本区间）+ `dsh-muctl runtime verify`（版本 / 原生模块 /
-selector-drift）管住，而不是靠改 DSH 源码。
-
-## 版本与命名
-
-```
-pkgver   = DSH 版本，`-` 换成 `_`（apk 版本规则）：0.2.2-rc.1 → 0.2.2_rc.1
-pkgrel   = r0
-包名     = dsh-mu-runtime
-文件     = dsh-mu-runtime-0.2.2_rc.1-r0.apk
-校验     = 同目录 SHA256SUMS；包内 /usr/local/lib/dsh-mu-runtime/MANIFEST.json
-          记录 { dsh, node, node_pty, built_at, arch, sha256_of_pty } 
-```
-
-## 包内布局
-
-```
-/usr/local/lib/dsh-mu-runtime/
-  node/bin/node                 node 24.x（DSH engines 要求 >= 24.9）
-  npm/                          该 node 自带 npm
-  dsh/                          @deepseek-ai/dsh@<ver> + node_modules（含已编译 pty.node）
-  MANIFEST.json                 见上
-  LICENSE.dsh                   上游 MIT 许可正文（再分发要求）
-/etc/dsh-mu-runtime/version     纯文本版本，平台快速比对
-```
-
-平台侧把它挂/链进 gateway rootfs 的 `/usr/local/lib/node_modules/@deepseek-ai/dsh`
-（沿用现在的 `DSH_RUNTIME_DIR` 约定，实例不用改）。
+平台侧的「读取线上版本」**只读 `runtimes.json`**（浏览器直连），列出全部历史并标出默认；
+`dsh-muctl runtime install`（不带版本）读 `channels.json` 的 `default`。
 
 ## 构建
 
 ```sh
-# 本机（需要 docker）
-./build.sh 0.2.2-rc.1            # 产出 dist/dsh-mu-runtime-0.2.2_rc.1-r0.apk + SHA256SUMS
+# 本地（需要 docker；默认 variant=local）
+sh build.sh 0.2.2-rc.1 0        # 产物在 dist/
+sh build.sh 0.2.2-rc.1 1 vscode # 变体 + rev 1
 
-# CI：.github/workflows/runtime-release.yml
-#   手动触发（workflow_dispatch），输入版本；产物挂到本仓库 release
+# CI：Actions → runtime-release → Run workflow
+#   dsh_version / rev / variant / channel(none|default|alpha) / arch
+#   会构建 → 发 release → 更新 channels/runtimes.json（channel≠none 时再更新 channels.json）
 ```
 
-构建在 `node:24-alpine` 里做，目的是让 `pty.node` 链接到 **musl**，与目标机一致。
-构建完立刻在干净的 `alpine:3.24` 里做一次"像用户那样装一遍"的验证（`verify.sh`）。
+CI 里 `variant` 留空视为 `plain`；`rev=0` 时 id 不带 `-r0`。
 
-## 安装（平台会自动做）
+## 工具
 
 ```sh
-apk add --allow-untrusted ./dsh-mu-runtime-0.2.2_rc.1-r0.apk
-dsh-muctl runtime use 0.2.2-rc.1     # 指向它并校验（平台命令，后续实现）
+python3 tools/normalize-index.py [--dry-run]   # 把旧 id 规范成 <dsh>-<variant>-<sha6>
+python3 tools/fill-sizes.py                    # 给缺 size 的条目补资产大小（只发 HEAD）
 ```
 
-## 回滚
+## 内网镜像（客户机不出网时）
 
-```sh
-apk add --allow-untrusted ./dsh-mu-runtime-0.2.1_rc.5-r0.apk
-dsh-muctl runtime use 0.2.1-rc.5
+把 `channels/*.json` 与 `.squashfs` 放到客户可达的位置（NAS / 文件服务器 / 对象存储），
+客户机的 `runtime_channel_base` 指向那份 `channels.json` 即可。平台会把
+`channels.json` 同目录的 `runtimes.json` 一起读，历史列表照常可用，**完全不碰 GitHub**。
+
+也可以用 admin 的「上传镜像」：页面会显示进度、预计剩余时间，可取消，失败会显示原因。
+
+## 与平台的关系
+
 ```
+运行时镜像（本仓库）      ← 平台安装/切换/校验，admin「运行 → 运行时」或 dsh-muctl runtime
+平台 dsh-mu（另一个仓库）  ← admin / 网关 / jail / CLI，依赖运行时镜像是"一个含 node_modules 的目录"
+```
+
+运行时只提供 `node_modules`；平台把它只读挂进每个实例的 jail（`/usr/local/lib/node_modules`）。
