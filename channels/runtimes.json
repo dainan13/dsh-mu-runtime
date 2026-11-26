@@ -2,6 +2,16 @@
   "schema": 1,
   "runtimes": [
     {
+      "id": "0.2.2-rc.4-plain-607de6",
+      "dsh": "0.2.2-rc.4",
+      "variant": "plain",
+      "rev": 0,
+      "sha256": "607de6dc78ca15f778d542b4e5ec7874b1c6262392010ec897f5b084da3a6ca1",
+      "size": 106868736,
+      "url": "https://github.com/dainan13/dsh-mu-runtime/releases/download/runtime-0.2.2-rc.4-plain-607de6/dsh-0.2.2-rc.4-plain-607de6.squashfs",
+      "built_at": "2026-11-26T16:37:57Z"
+    },
+    {
       "id": "0.2.2-rc.3-plain-0aa439",
       "dsh": "0.2.2-rc.3",
       "variant": "plain",
