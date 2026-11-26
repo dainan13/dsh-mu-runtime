@@ -2,12 +2,12 @@
   "schema": 2,
   "note": "由 runtime-release workflow 维护；dsh-muctl runtime install（不带版本）读这里的 default",
   "default": {
-    "id": "0.2.2-rc.3-plain-0aa439",
-    "dsh": "0.2.2-rc.3",
+    "id": "0.2.2-rc.4-plain-607de6",
+    "dsh": "0.2.2-rc.4",
     "rev": 0,
     "variant": "plain",
-    "sha256": "0aa4396aa6ac27094d92111e212c0a2e538171692a2140539428e262e6a903d1",
-    "url": "https://github.com/dainan13/dsh-mu-runtime/releases/download/runtime-0.2.2-rc.3-plain-0aa439/dsh-0.2.2-rc.3-plain-0aa439.squashfs"
+    "sha256": "607de6dc78ca15f778d542b4e5ec7874b1c6262392010ec897f5b084da3a6ca1",
+    "url": "https://github.com/dainan13/dsh-mu-runtime/releases/download/runtime-0.2.2-rc.4-plain-607de6/dsh-0.2.2-rc.4-plain-607de6.squashfs"
   },
   "alpha": {
     "id": "0.2.2-alpha.3-plain-979c89",
